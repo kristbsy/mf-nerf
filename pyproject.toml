@@ -1,0 +1,12 @@
+[project]
+name = "mfnerf"
+version = "0.1.0"
+dependencies = [
+    "nerfstudio" # you may want to consider pinning the version, ie "nerfstudio==0.1.19"
+]
+
+[tool.setuptools.packages.find]
+include = ["mfnerf*"]
+
+[project.entry-points.'nerfstudio.method_configs']
+mfnerf = 'mfnerf.mfnerf_config:mfnerf'
