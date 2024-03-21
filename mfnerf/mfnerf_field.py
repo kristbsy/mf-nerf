@@ -238,22 +238,28 @@ class MfnerfField(Field):
         if not self._sample_locations.requires_grad:
             self._sample_locations.requires_grad = True
         positions_flat = positions.view(-1, 3)
-        
-        assignments = self.get_network_assignments(positions_flat).cuda()
-        processed_points = torch.zeros((positions_flat.shape[0], self.geo_feat_dim + 1), dtype=torch.half).cuda()
-        original_indicies = torch.arange(positions_flat.size(0)).cuda()
-        for i, network in enumerate(self.mlps_bases):
-            with torch.cuda.stream(self.streams[i]):
-                mask = (assignments == i)
-                group_indices = original_indicies[mask]
-                group_points = positions_flat[mask]
-                processed_points[group_indices] = network(group_points)
-        torch.cuda.synchronize()
-        
-
-
-        #h = self.mlp_base(positions_flat).view(*ray_samples.frustums.shape, -1)
-        h = processed_points.view(*ray_samples.frustums.shape, -1)
+        if self.training:
+            assignments = self.get_network_assignments(positions_flat).cuda()
+            processed_points = torch.zeros((positions_flat.shape[0], self.geo_feat_dim + 1), dtype=torch.half).cuda()
+            original_indicies = torch.arange(positions_flat.size(0)).cuda()
+            for i, network in enumerate(self.mlps_bases):
+                with torch.cuda.stream(self.streams[i]):
+                    mask = (assignments == i)
+                    group_indices = original_indicies[mask]
+                    group_points = positions_flat[mask]
+                    processed_points[group_indices] = network(group_points)
+            torch.cuda.synchronize()
+            #h = self.mlp_base(positions_flat).view(*ray_samples.frustums.shape, -1)
+            h = processed_points.view(*ray_samples.frustums.shape, -1)
+        else:
+            processed_points = [torch.zeros((positions_flat.shape[0], self.geo_feat_dim + 1), dtype=torch.half).cuda() for _ in range(4)]
+            for i, network in enumerate(self.mlps_bases):
+                with torch.cuda.stream(self.streams[i]):
+                    processed_points[i] = network(positions_flat)
+            torch.cuda.synchronize()
+            pp = torch.stack(processed_points, dim=0).mean(dim=0)
+            h = pp.view(*ray_samples.frustums.shape, -1)
+            
         density_before_activation, base_mlp_out = torch.split(h, [1, self.geo_feat_dim], dim=-1)
         self._density_before_activation = density_before_activation
 
@@ -339,17 +345,26 @@ class MfnerfField(Field):
             ),
             dim=-1,
         )
+        if self.training:
+            assignments = self.get_network_assignments(h).cuda()
+            processed_points = torch.zeros((h.shape[0], 3), dtype=torch.half).cuda()
+            original_indicies = torch.arange(h.size(0)).cuda()
+            for i, network in enumerate(self.mlp_heads):
+                with torch.cuda.stream(self.streams[i]):
+                    mask = (assignments == i)
+                    group_indices = original_indicies[mask]
+                    group_points = h[mask]
+                    processed_points[group_indices] = network(group_points)
+            torch.cuda.synchronize()
+        else:
+            processed_points = [torch.zeros((h.shape[0], 3), dtype=torch.half).cuda() for _ in range(4)]
+            for i, network in enumerate(self.mlp_heads):
+                with torch.cuda.stream(self.streams[i]):
+                    processed_points[i] = network(h)
+            torch.cuda.synchronize()
+            pp = torch.stack(processed_points, dim=0).mean(dim=0)
+            processed_points = pp
         
-        assignments = self.get_network_assignments(h).cuda()
-        processed_points = torch.zeros((h.shape[0], 3), dtype=torch.half).cuda()
-        original_indicies = torch.arange(h.size(0)).cuda()
-        for i, network in enumerate(self.mlp_heads):
-            with torch.cuda.stream(self.streams[i]):
-                mask = (assignments == i)
-                group_indices = original_indicies[mask]
-                group_points = h[mask]
-                processed_points[group_indices] = network(group_points)
-        torch.cuda.synchronize()
         rgb = processed_points.view(*outputs_shape, -1).to(directions)
         outputs.update({FieldHeadNames.RGB: rgb})
 
