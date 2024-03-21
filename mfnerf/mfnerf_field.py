@@ -220,9 +220,9 @@ class MfnerfField(Field):
 
     def get_network_assignments(self, points: Tensor):
         """Takes in a tensor of shape [N, 3] and returns a list with their assigned network with shape [N]"""
-        top_right_mask = (points[:, 0] > 0.0) & (points[:, 1] > 0.0)
-        top_left_mask = (points[:, 0] < 0.0) & (points[:, 1] > 0.0)
-        bottom_right_mask = (points[:, 0] > 0.0) & (points[:, 1] < 0.0)
+        top_right_mask = (points[:, 0] > 0.5) & (points[:, 1] > 0.5)
+        top_left_mask = (points[:, 0] < 0.5) & (points[:, 1] > 0.5)
+        bottom_right_mask = (points[:, 0] > 0.5) & (points[:, 1] < 0.5)
         assignments = bottom_right_mask * 1 + top_left_mask * 2 + top_right_mask * 3
         return assignments
 
@@ -357,8 +357,9 @@ class MfnerfField(Field):
                 group_indices = original_indicies[mask]
                 group_points = h[mask]
                 net_output = network(group_points)
-                if self.training:
-                    colors = torch.rand((4,3), dtype=torch.half).cuda()
+                if not self.training:
+                    colors = torch.tensor([[0.0, 0.0, 0.0],[0.3, 0.0, 0.0],[0.0, 0.3, 0.0],[0.0,0.0,0.3]], dtype=torch.half).cuda()
+                    #colors = torch.rand((4,3), dtype=torch.half).cuda()
                     net_output = net_output + colors[i]
                 processed_points[group_indices] = net_output
         torch.cuda.synchronize()
