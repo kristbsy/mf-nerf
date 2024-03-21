@@ -254,8 +254,7 @@ class MfnerfField(Field):
         else:
             processed_points = [torch.zeros((positions_flat.shape[0], self.geo_feat_dim + 1), dtype=torch.half).cuda() for _ in range(4)]
             for i, network in enumerate(self.mlps_bases):
-                with torch.cuda.stream(self.streams[i]):
-                    processed_points[i] = network(positions_flat)
+                processed_points[i] = network(positions_flat)
             torch.cuda.synchronize()
             pp = torch.stack(processed_points, dim=0).mean(dim=0)
             h = pp.view(*ray_samples.frustums.shape, -1)
@@ -359,8 +358,7 @@ class MfnerfField(Field):
         else:
             processed_points = [torch.zeros((h.shape[0], 3), dtype=torch.half).cuda() for _ in range(4)]
             for i, network in enumerate(self.mlp_heads):
-                with torch.cuda.stream(self.streams[i]):
-                    processed_points[i] = network(h)
+                processed_points[i] = network(h)
             torch.cuda.synchronize()
             pp = torch.stack(processed_points, dim=0).mean(dim=0)
             processed_points = pp
