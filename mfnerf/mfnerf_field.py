@@ -220,7 +220,10 @@ class MfnerfField(Field):
 
     def get_network_assignments(self, points: Tensor):
         """Takes in a tensor of shape [N, 3] and returns a list with their assigned network with shape [N]"""
-        assignments = torch.randint(0,4,(points.size(0),))
+        top_right_mask = (points[:, 0] > 0.0) & (points[:, 1] > 0.0)
+        top_left_mask = (points[:, 0] < 0.0) & (points[:, 1] > 0.0)
+        bottom_right_mask = (points[:, 0] > 0.0) & (points[:, 1] < 0.0)
+        assignments = bottom_right_mask * 1 + top_left_mask * 2 + top_right_mask * 3
         return assignments
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
@@ -245,6 +248,8 @@ class MfnerfField(Field):
         for i, network in enumerate(self.mlps_bases):
             with torch.cuda.stream(self.streams[i]):
                 mask = (assignments == i)
+                if torch.count_nonzero(mask) == 0:
+                    continue
                 group_indices = original_indicies[mask]
                 group_points = positions_flat[mask]
                 processed_points[group_indices] = network(group_points)
@@ -262,13 +267,15 @@ class MfnerfField(Field):
         # from smaller internal (float16) parameters.
         density = self.average_init_density * trunc_exp(density_before_activation.to(positions))
         density = density * selector[..., None]
-        return density, base_mlp_out
+        return density, torch.cat((base_mlp_out, assignments.view(*ray_samples.frustums.shape, -1)), dim=-1)
 
     def get_outputs(
         self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None
     ) -> Dict[FieldHeadNames, Tensor]:
         assert density_embedding is not None
         outputs = {}
+        density_embedding, assignments = torch.split(density_embedding, [self.geo_feat_dim,1], dim=-1)
+        assignments = assignments.to(torch.int64).flatten()
         if ray_samples.camera_indices is None:
             raise AttributeError("Camera indices are not provided.")
         camera_indices = ray_samples.camera_indices.squeeze()
@@ -340,15 +347,20 @@ class MfnerfField(Field):
             dim=-1,
         )
         
-        assignments = self.get_network_assignments(h).cuda()
         processed_points = torch.zeros((h.shape[0], 3), dtype=torch.half).cuda()
         original_indicies = torch.arange(h.size(0)).cuda()
         for i, network in enumerate(self.mlp_heads):
             with torch.cuda.stream(self.streams[i]):
                 mask = (assignments == i)
+                if torch.count_nonzero(mask) == 0:
+                    continue
                 group_indices = original_indicies[mask]
                 group_points = h[mask]
-                processed_points[group_indices] = network(group_points)
+                net_output = network(group_points)
+                if self.training:
+                    colors = torch.rand((4,3), dtype=torch.half).cuda()
+                    net_output = net_output + colors[i]
+                processed_points[group_indices] = net_output
         torch.cuda.synchronize()
         rgb = processed_points.view(*outputs_shape, -1).to(directions)
         outputs.update({FieldHeadNames.RGB: rgb})
