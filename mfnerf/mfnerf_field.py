@@ -52,6 +52,8 @@ class MfnerfField(Field):
         use_pred_normals: whether to use predicted normals
         use_average_appearance_embedding: whether to use average appearance embedding or zeros for inference
         spatial_distortion: spatial distortion to apply to the scene
+        blocks_x: blocks in the x direction
+        blocks_y: blocks in the y direction
     """
 
     aabb: Tensor
@@ -83,6 +85,8 @@ class MfnerfField(Field):
         spatial_distortion: Optional[SpatialDistortion] = None,
         average_init_density: float = 1.0,
         implementation: Literal["tcnn", "torch"] = "tcnn",
+        blocks_x = 4,
+        blocks_y = 4
     ) -> None:
         super().__init__()
 
@@ -108,6 +112,9 @@ class MfnerfField(Field):
         self.base_res = base_res
         self.average_init_density = average_init_density
         self.step = 0
+        self.blocks_x = blocks_x
+        self.blocks_y = blocks_y
+        self.total_blocks = self.blocks_x * self.blocks_y
 
         self.direction_encoding = SHEncoding(
             levels=4,
@@ -118,23 +125,9 @@ class MfnerfField(Field):
             in_dim=3, num_frequencies=2, min_freq_exp=0, max_freq_exp=2 - 1, implementation=implementation
         )
 
-        self.mlp_base = MLPWithHashEncoding(
-            num_levels=num_levels,
-            min_res=base_res,
-            max_res=max_res,
-            log2_hashmap_size=log2_hashmap_size,
-            features_per_level=features_per_level,
-            num_layers=num_layers,
-            layer_width=hidden_dim,
-            out_dim=1 + self.geo_feat_dim,
-            activation=nn.ReLU(),
-            out_activation=None,
-            implementation=implementation,
-        )
-
-        self.streams = [torch.cuda.Stream() for _ in range(4)]
+        self.streams = [torch.cuda.Stream() for _ in range(self.total_blocks)]
         self.mlps_bases = nn.ModuleList()
-        for _ in range(4):
+        for _ in range(self.total_blocks):
             self.mlps_bases.append(MLPWithHashEncoding(
                 num_levels=num_levels,
                 min_res=base_res,
@@ -194,18 +187,8 @@ class MfnerfField(Field):
             )
             self.field_head_pred_normals = PredNormalsFieldHead(in_dim=self.mlp_pred_normals.get_out_dim())
 
-        self.mlp_head = MLP(
-            in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
-            num_layers=num_layers_color,
-            layer_width=hidden_dim_color,
-            out_dim=3,
-            activation=nn.ReLU(),
-            out_activation=nn.Sigmoid(),
-            implementation=implementation,
-        )
-
         self.mlp_heads = nn.ModuleList()
-        for _ in range(4):
+        for _ in range(self.total_blocks):
             self.mlp_heads.append(
                 MLP(
                     in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
@@ -218,13 +201,12 @@ class MfnerfField(Field):
                 )
             )
 
-    def get_network_assignments(self, points: Tensor):
+    @staticmethod
+    def get_network_assignments(points: Tensor, networks_x=4, networks_y=4):
         """Takes in a tensor of shape [N, 3] and returns a list with their assigned network with shape [N]"""
-        top_right_mask = (points[:, 0] > 0.5) & (points[:, 1] > 0.5)
-        top_left_mask = (points[:, 0] < 0.5) & (points[:, 1] > 0.5)
-        bottom_right_mask = (points[:, 0] > 0.5) & (points[:, 1] < 0.5)
-        assignments = bottom_right_mask * 1 + top_left_mask * 2 + top_right_mask * 3
-        return assignments
+        xs = torch.floor(points[:, 0] * networks_x)
+        ys = torch.floor(points[:, 1] * networks_y)
+        return ys * networks_x + xs
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
         """Computes and returns the densities."""
@@ -242,7 +224,8 @@ class MfnerfField(Field):
             self._sample_locations.requires_grad = True
         positions_flat = positions.view(-1, 3)
         
-        assignments = self.get_network_assignments(positions_flat).cuda()
+        assignments = self.get_network_assignments(positions_flat, self.blocks_x, self.blocks_y).cuda()
+
         processed_points = torch.zeros((positions_flat.shape[0], self.geo_feat_dim + 1), dtype=torch.half).cuda()
         original_indicies = torch.arange(positions_flat.size(0)).cuda()
         for i, network in enumerate(self.mlps_bases):
@@ -357,10 +340,6 @@ class MfnerfField(Field):
                 group_indices = original_indicies[mask]
                 group_points = h[mask]
                 net_output = network(group_points)
-                if not self.training:
-                    colors = torch.tensor([[0.0, 0.0, 0.0],[0.3, 0.0, 0.0],[0.0, 0.3, 0.0],[0.0,0.0,0.3]], dtype=torch.half).cuda()
-                    #colors = torch.rand((4,3), dtype=torch.half).cuda()
-                    net_output = net_output + colors[i]
                 processed_points[group_indices] = net_output
         torch.cuda.synchronize()
         rgb = processed_points.view(*outputs_shape, -1).to(directions)
