@@ -2,5 +2,5 @@
 
 Install  
 `
-python -m pip install -e .
+pip install -e .
 `
