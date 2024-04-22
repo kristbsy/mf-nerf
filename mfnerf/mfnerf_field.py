@@ -228,14 +228,20 @@ class MfnerfField(Field):
 
         processed_points = torch.zeros((positions_flat.shape[0], self.geo_feat_dim + 1), dtype=torch.half).cuda()
         original_indicies = torch.arange(positions_flat.size(0)).cuda()
-        for i, network in enumerate(self.mlps_bases):
+        group_indices = []
+        group_points = []
+        applicable_networks = []
+        for i in range(len(self.mlps_bases)):
+            mask = assignments == i
+            if torch.count_nonzero(mask) == 0:
+                continue
+            group_indices.append(original_indicies[mask])
+            group_points.append(positions_flat[mask])
+            applicable_networks.append(i)
+        for i in range(len(applicable_networks)):
+            net_index = applicable_networks[i]
             with torch.cuda.stream(self.streams[i]):
-                mask = (assignments == i)
-                if torch.count_nonzero(mask) == 0:
-                    continue
-                group_indices = original_indicies[mask]
-                group_points = positions_flat[mask]
-                processed_points[group_indices] = network(group_points)
+                processed_points[group_indices[i]] = self.mlps_bases[net_index](group_points[i])
         torch.cuda.synchronize()
         
 
@@ -329,18 +335,37 @@ class MfnerfField(Field):
             ),
             dim=-1,
         )
-        
         processed_points = torch.zeros((h.shape[0], 3), dtype=torch.half).cuda()
         original_indicies = torch.arange(h.size(0)).cuda()
-        for i, network in enumerate(self.mlp_heads):
+        group_indices = []
+        group_points = []
+        applicable_networks = []
+        for i in range(len(self.mlps_bases)):
+            mask = assignments == i
+            if torch.count_nonzero(mask) == 0:
+                continue
+            group_indices.append(original_indicies[mask])
+            group_points.append(h[mask])
+            applicable_networks.append(i)
+        
+        for i in range(len(applicable_networks)):
+            net_index = applicable_networks[i]
             with torch.cuda.stream(self.streams[i]):
-                mask = (assignments == i)
-                if torch.count_nonzero(mask) == 0:
-                    continue
-                group_indices = original_indicies[mask]
-                group_points = h[mask]
-                net_output = network(group_points)
-                processed_points[group_indices] = net_output
+                processed_points[group_indices[i]] = self.mlp_heads[net_index](group_points[i])
+                
+                
+                
+        #processed_points = torch.zeros((h.shape[0], 3), dtype=torch.half).cuda()
+        #original_indicies = torch.arange(h.size(0)).cuda()
+        #for i, network in enumerate(self.mlp_heads):
+        #    with torch.cuda.stream(self.streams[i]):
+        #        mask = (assignments == i)
+        #        if torch.count_nonzero(mask) == 0:
+        #            continue
+        #        group_indices = original_indicies[mask]
+        #        group_points = h[mask]
+        #        net_output = network(group_points)
+        #        processed_points[group_indices] = net_output
         torch.cuda.synchronize()
         rgb = processed_points.view(*outputs_shape, -1).to(directions)
         outputs.update({FieldHeadNames.RGB: rgb})
