@@ -1,8 +1,10 @@
+import json
 from tqdm import tqdm
 from transformers import pipeline, utils
 from PIL import Image
 import requests
 import numpy as np
+from simple_chalk import chalk
 from pathlib import Path
 import argparse
 
@@ -26,41 +28,55 @@ FILTER = ['car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle', 'person', 'ri
 def load_image(image_path: str):
     """Load an image from a file or URL."""
     if image_path.startswith('http://') or image_path.startswith('https://'):
-        return Image.open(requests.get(image_path, stream=True).raw).convert('RGBA')
+        return Image.open(requests.get(image_path, stream=True).raw)
     else:
-        return Image.open(image_path).convert('RGBA')
+        return Image.open(image_path)
+
+
+def segment_images(folder: Path):
+    image_dir = folder / 'images'
+    pathlist = list(image_dir.glob('*.png'))
+    mask_dir = folder / 'masks'
+    Path.mkdir(mask_dir, exist_ok=True)
     
-
-def segment_image(image_path: str):
-    """Segment the image at the given path."""
-    image = load_image(image_path)
-    original_size = image.size
-
-    results = semantic_segmentation(image)
-    mask = np.zeros((original_size[1], original_size[0]), dtype=bool)
-    for r in results:
-        if r['label'] in FILTER:
-            mask = mask | r['mask'] > 0
-
-    # Apply transparency based on segmentation
-    alpha_channel = np.where(mask, 0, 255).astype(np.uint8)  # Set alpha to 0 for masked areas
-    image_array = np.array(image)
-    image_array[:, :, 3] = alpha_channel
+    print(f"Segmenting {len(pathlist)} images in {folder}")
     
-    # Save the modified image inplace
-    result_image = Image.fromarray(image_array)
-    result_image.save(image_path)
+    with open(folder / 'transforms.json', 'r') as f:
+        transformsFile = json.load(f)
+        
+        ## use tqdm to show progress bar
+        for index, image_path in enumerate(tqdm(pathlist)):
+            image_path = image_path.as_posix()
+            mask_img_path = image_path.split('/')[-1].replace('.png', '_mask.jpeg')
+            mask_path_complete = mask_dir / mask_img_path
+            transformsFile["frames"][index]["mask_path"] = "masks/" + mask_img_path
+            
+            image = load_image(image_path)
+            original_size = image.size
+
+            results = semantic_segmentation(image)
+            mask = np.zeros((original_size[1], original_size[0]), dtype=bool)
+            for r in results:
+                if r['label'] in FILTER:
+                    mask = mask | r['mask'] > 0
+
+            # Apply transparency based on segmentation
+            alpha_channel = np.where(mask, 0, 255).astype(np.uint8)  # Set alpha to 0 for masked areas
+            
+            # Save the modified image inplace
+            result_image = Image.fromarray(alpha_channel, mode='L')
+            result_image.save(mask_path_complete, 'jpeg')
+        
+        print(chalk.green("Segmentation complete, saving transforms file..."))
+        json.dump(transformsFile, open(folder / 'transforms.json', 'w'))
 
 
 def main():
     parser = argparse.ArgumentParser(description='Segment images')
     parser.add_argument('data', type=str, help='Folder containing images to segment')
     data_folder = Path(parser.parse_args().data)
-    pathlist = list(data_folder.glob('*.png'))
+    segment_images(data_folder)
     
-    ## use tqdm to show progress bar
-    for image_path in tqdm(pathlist):
-        segment_image(image_path.as_posix())
 
 
 if __name__ == '__main__':
