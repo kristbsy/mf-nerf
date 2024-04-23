@@ -68,7 +68,7 @@ def segment_images(folder: Path):
             result_image.save(mask_path_complete, 'jpeg')
         
         print(chalk.green("Segmentation complete, saving transforms file..."))
-        json.dump(transformsFile, open(folder / 'transforms.json', 'w'))
+        json.dump(transformsFile, open(folder / 'transforms.json', 'w'), indent=4)
 
 
 def main():
