@@ -2,7 +2,7 @@
 
 Install  
 `
-python -m pip install -e .
+pip install -e .
 `
 
 `
@@ -14,3 +14,11 @@ ns-train mfnerf --data ./scenarios/bww_entrance/ --vis wandb --experiment-name 9
 `
 
 
+# Image segmentation and masking
+Remove vehicles and people from images and replace with transparency  
+
+Install requirements:  
+`pip install -r ./seg/requirements.txt`
+
+Inplace process all images (only png) in folder specified.  
+`python -m seg.process [datafolder]`
