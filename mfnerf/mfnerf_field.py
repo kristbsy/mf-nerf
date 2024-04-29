@@ -126,7 +126,6 @@ class MfnerfField(Field):
             in_dim=3, num_frequencies=2, min_freq_exp=0, max_freq_exp=2 - 1, implementation=implementation
         )
 
-        self.streams = [torch.cuda.Stream() for _ in range(self.total_blocks)]
         self.mlps_bases = nn.ModuleList()
         for _ in range(self.total_blocks):
             self.mlps_bases.append(MLPWithHashEncoding(
@@ -278,13 +277,11 @@ class MfnerfField(Field):
             group_points.append(positions_flat[mask])
         for i in range(len(applicable_networks)):
             net_index = applicable_networks[i]
-            with torch.cuda.stream(self.streams[i]):
-                processed_points[group_indices[i]] = self.mlps_bases[net_index](group_points[i])
+            processed_points[group_indices[i]] = self.mlps_bases[net_index](group_points[i])
 
         del original_indicies
         del group_indices
         del group_points
-        torch.cuda.synchronize()
         
 
 
@@ -297,14 +294,17 @@ class MfnerfField(Field):
         # from smaller internal (float16) parameters.
         density = self.average_init_density * trunc_exp(density_before_activation.to(positions))
         #density = density * selector[..., None]
-        return density, torch.cat((base_mlp_out, assignments.view(*ray_samples.frustums.shape, -1)), dim=-1)
+        self.assignments = assignments
+        return density, base_mlp_out
 
     def get_outputs(
-        self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None
+        self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None, assignments: Optional[Tensor] = None
     ) -> Dict[FieldHeadNames, Tensor]:
         assert density_embedding is not None
         outputs = {}
-        density_embedding, assignments = torch.split(density_embedding, [self.geo_feat_dim,1], dim=-1)
+        
+        #density_embedding, assignments = torch.split(density_embedding, [self.geo_feat_dim,1], dim=-1)
+        assignments = self.assignments
         assignments = assignments.to(torch.int64).flatten()
         if ray_samples.camera_indices is None:
             raise AttributeError("Camera indices are not provided.")
@@ -389,10 +389,8 @@ class MfnerfField(Field):
         
         for i in range(len(applicable_networks)):
             net_index = applicable_networks[i]
-            with torch.cuda.stream(self.streams[i]):
-                processed_points[group_indices[i]] = self.mlp_heads[net_index](group_points[i])
+            processed_points[group_indices[i]] = self.mlp_heads[net_index](group_points[i])
                 
-        torch.cuda.synchronize()
         rgb = processed_points.view(*outputs_shape, -1).to(directions)
         outputs.update({FieldHeadNames.RGB: rgb})
 
