@@ -236,17 +236,13 @@ class MfnerfField(Field):
         ys = torch.floor(points[:, 1] * networks_y)
         ys_start = ys / networks_y
 
-        lengths = self.aabb[1] - self.aabb[0]
-        x_width = lengths[0]
-        y_width = lengths[1]
-
         assignments = ys * networks_x + xs
         assignments = assignments.int()
         new_points = points.detach().clone()
         new_points[:, 0] -= xs_start
-        new_points[:, 0] /= x_width
+        new_points[:, 0] *= networks_x
         new_points[:, 1] -= ys_start
-        new_points[:, 1] /= y_width
+        new_points[:, 1] *= networks_y
         new_points.clip(0, 1)
         return new_points, assignments
 
@@ -257,7 +253,7 @@ class MfnerfField(Field):
             positions = self.spatial_distortion(positions)
             positions = (positions + 2.0) / 4.0
         else:
-            positions = ray_samples.frustums.get_positions()
+            positions = SceneBox.get_normalized_positions(ray_samples.frustums.get_positions(), self.aabb)
             
         self._sample_locations = positions
         if not self._sample_locations.requires_grad:
@@ -268,21 +264,12 @@ class MfnerfField(Field):
 
         processed_points = torch.zeros((positions_flat.shape[0], self.geo_feat_dim + 1), dtype=torch.half, device='cuda')
         original_indicies = torch.arange(positions_flat.size(0), requires_grad=False, device='cuda').detach()
-        group_indices = []
-        group_points = []
         applicable_networks = torch.unique(assignments)
         for i in applicable_networks:
             mask = assignments == i
-            group_indices.append(original_indicies[mask])
-            group_points.append(positions_flat[mask])
-        for i in range(len(applicable_networks)):
-            net_index = applicable_networks[i]
-            processed_points[group_indices[i]] = self.mlps_bases[net_index](group_points[i])
-
-        del original_indicies
-        del group_indices
-        del group_points
-        
+            group_index = original_indicies[mask]
+            group_point = positions_flat[mask]
+            processed_points[group_index] = self.mlps_bases[i](group_point)
 
 
         h = processed_points.view(*ray_samples.frustums.shape, -1)
@@ -378,18 +365,12 @@ class MfnerfField(Field):
         )
         processed_points = torch.zeros((h.shape[0], 3), dtype=torch.half, device='cuda')
         original_indicies = torch.arange(h.size(0), device='cuda')
-        group_indices = []
-        group_points = []
-        applicable_networks = []
         applicable_networks = torch.unique(assignments)
         for i in applicable_networks:
             mask = assignments == i
-            group_indices.append(original_indicies[mask])
-            group_points.append(h[mask])
-        
-        for i in range(len(applicable_networks)):
-            net_index = applicable_networks[i]
-            processed_points[group_indices[i]] = self.mlp_heads[net_index](group_points[i])
+            group_index = original_indicies[mask]
+            group_point = h[mask]
+            processed_points[group_index] = self.mlp_heads[i](group_point)
                 
         rgb = processed_points.view(*outputs_shape, -1).to(directions)
         outputs.update({FieldHeadNames.RGB: rgb})
