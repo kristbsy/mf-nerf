@@ -2,11 +2,11 @@
 __pycache__/
 *.py[cod]
 *$py.class
-outputs/
-scenarios/
+.DS_Store
 # C extensions
 *.so
-.DS_Store
+/outputs
+/scenarios
 # Distribution / packaging
 .Python
 build/

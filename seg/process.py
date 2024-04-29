@@ -22,8 +22,8 @@ PALETTE = np.array([[128, 64, 128], [244, 35, 232], [70, 70, 70], [102, 102, 156
                     [70, 130, 180], [220, 20, 60], [255, 0, 0], [0, 0, 142], [0, 0, 70], [0, 60, 100], 
                     [0, 80, 100], [0, 0, 230], [119, 11, 32]])
 
+#FILTER = ["person"]
 FILTER = ['car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle', 'person', 'rider']
-
 
 def load_image(image_path: str):
     """Load an image from a file or URL."""
@@ -35,21 +35,18 @@ def load_image(image_path: str):
 
 def segment_images(folder: Path):
     image_dir = folder / 'images'
-    pathlist = list(image_dir.glob('*.png'))
     mask_dir = folder / 'masks'
     Path.mkdir(mask_dir, exist_ok=True)
-    
-    print(f"Segmenting {len(pathlist)} images in {folder}")
     
     with open(folder / 'transforms.json', 'r') as f:
         transformsFile = json.load(f)
         
         ## use tqdm to show progress bar
-        for index, image_path in enumerate(tqdm(pathlist)):
-            image_path = image_path.as_posix()
+        for frame in tqdm(transformsFile["frames"]):
+            image_path = str(folder / frame["file_path"])
             mask_img_path = image_path.split('/')[-1].replace('.png', '_mask.jpeg')
             mask_path_complete = mask_dir / mask_img_path
-            transformsFile["frames"][index]["mask_path"] = "masks/" + mask_img_path
+            frame["mask_path"] = "masks/" + mask_img_path
             
             image = load_image(image_path)
             original_size = image.size
@@ -68,7 +65,7 @@ def segment_images(folder: Path):
             result_image.save(mask_path_complete, 'jpeg')
         
         print(chalk.green("Segmentation complete, saving transforms file..."))
-        json.dump(transformsFile, open(folder / 'transforms.json', 'w'))
+        json.dump(transformsFile, open(folder / 'transforms.json', 'w'), indent=4)
 
 
 def main():
