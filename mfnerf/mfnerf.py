@@ -52,6 +52,10 @@ class MfNerfModelConfig(ModelConfig):
     """Dimension of hidden layers for color network"""
     hidden_dim_transient: int = 64
     """Dimension of hidden layers for transient network"""
+    blocks_x: int = 4
+    """Number of blocks in the x direction"""
+    blocks_y: int = 4
+    """Number of blocks in the y direction"""
     num_levels: int = 16
     """Number of levels of the hashmap for the base mlp."""
     base_res: int = 16
@@ -155,6 +159,8 @@ class MfNerfModel(Model):
             appearance_embedding_dim=appearance_embedding_dim,
             average_init_density=self.config.average_init_density,
             implementation=self.config.implementation,
+            blocks_x=self.config.blocks_x,
+            blocks_y=self.config.blocks_y
         )
 
         self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(
