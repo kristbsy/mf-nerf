@@ -238,7 +238,7 @@ class MfnerfField(Field):
 
         assignments = ys * networks_x + xs
         assignments = assignments.int()
-        new_points = points.detach().clone()
+        new_points = points.clone()
         new_points[:, 0] -= xs_start
         new_points[:, 0] *= networks_x
         new_points[:, 1] -= ys_start
