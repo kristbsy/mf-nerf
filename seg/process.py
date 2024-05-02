@@ -22,8 +22,9 @@ PALETTE = np.array([[128, 64, 128], [244, 35, 232], [70, 70, 70], [102, 102, 156
                     [70, 130, 180], [220, 20, 60], [255, 0, 0], [0, 0, 142], [0, 0, 70], [0, 60, 100], 
                     [0, 80, 100], [0, 0, 230], [119, 11, 32]])
 
-#FILTER = ["person"]
-FILTER = ['car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle', 'person', 'rider']
+FILTER = ["person"]
+#FILTER = ["car"]
+#FILTER = ['car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle', 'person', 'rider']
 
 def load_image(image_path: str):
     """Load an image from a file or URL."""
@@ -34,16 +35,19 @@ def load_image(image_path: str):
 
 
 def segment_images(folder: Path):
-    image_dir = folder / 'images'
+    #image_dir = folder / 'images'
     mask_dir = folder / 'masks'
     Path.mkdir(mask_dir, exist_ok=True)
+    for i in [2,4,8]:
+        dirPath = Path(mask_dir.as_posix()+("_" + str(i)))
+        Path.mkdir(dirPath, exist_ok=True)
     
     with open(folder / 'transforms.json', 'r') as f:
         transformsFile = json.load(f)
         
         ## use tqdm to show progress bar
         for frame in tqdm(transformsFile["frames"]):
-            image_path = str(folder / frame["file_path"])
+            image_path = (folder / frame["file_path"]).as_posix()
             mask_img_path = image_path.split('/')[-1].replace('.png', '_mask.jpeg')
             mask_path_complete = mask_dir / mask_img_path
             frame["mask_path"] = "masks/" + mask_img_path
@@ -63,6 +67,11 @@ def segment_images(folder: Path):
             # Save the modified image inplace
             result_image = Image.fromarray(alpha_channel, mode='L')
             result_image.save(mask_path_complete, 'jpeg')
+            # save downscale 2,4,8
+            for i in [2,4,8]:
+                path = Path(mask_dir.as_posix()+("_" + str(i))) / mask_img_path
+                result_image_ = result_image.resize((original_size[0] // i, original_size[1] // i), Image.NEAREST)
+                result_image_.save(path, 'jpeg')
         
         print(chalk.green("Segmentation complete, saving transforms file..."))
         json.dump(transformsFile, open(folder / 'transforms.json', 'w'), indent=4)
