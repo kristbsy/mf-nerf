@@ -9,7 +9,7 @@ from pathlib import Path
 import argparse
 
 utils.logging.set_verbosity_error()
-semantic_segmentation = pipeline(task="image-segmentation", model="nvidia/segformer-b1-finetuned-cityscapes-1024-1024", feature_extractor="nvidia/segformer-b5-finetuned-cityscapes-1024-1024", device=0)
+semantic_segmentation = pipeline(task="image-segmentation", model="nvidia/segformer-b5-finetuned-cityscapes-1024-1024", feature_extractor="nvidia/segformer-b5-finetuned-cityscapes-1024-1024", device=0)
 
 # Define the class names and color palette from Cityscapes
 CLASSES = [
