@@ -1,9 +1,6 @@
 """
 Field for compound nerf model, adds scene contraction and image embeddings to instant ngp
 """
-
-from pickle import dump
-    
 from typing import Dict, Literal, Optional, Tuple
 
 import torch
@@ -187,19 +184,15 @@ class MfnerfField(Field):
             )
             self.field_head_pred_normals = PredNormalsFieldHead(in_dim=self.mlp_pred_normals.get_out_dim())
 
-        self.mlp_heads = nn.ModuleList()
-        for _ in range(self.total_blocks):
-            self.mlp_heads.append(
-                MLP(
-                    in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
-                    num_layers=num_layers_color,
-                    layer_width=hidden_dim_color,
-                    out_dim=3,
-                    activation=nn.ReLU(),
-                    out_activation=nn.Sigmoid(),
-                    implementation=implementation,
-                )
-            )
+        self.mlp_head = MLP(
+            in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
+            num_layers=num_layers_color,
+            layer_width=hidden_dim_color,
+            out_dim=3,
+            activation=nn.ReLU(),
+            out_activation=nn.Sigmoid(),
+            implementation=implementation,
+        )
 
     @staticmethod
     def get_network_assignments(points: Tensor, networks_x: Tensor, networks_y: Tensor):
@@ -285,14 +278,12 @@ class MfnerfField(Field):
         return density, base_mlp_out
 
     def get_outputs(
-        self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None, assignments: Optional[Tensor] = None
+        self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None
     ) -> Dict[FieldHeadNames, Tensor]:
         assert density_embedding is not None
         outputs = {}
         
         #density_embedding, assignments = torch.split(density_embedding, [self.geo_feat_dim,1], dim=-1)
-        assignments = self.assignments
-        assignments = assignments.to(torch.int64).flatten()
         if ray_samples.camera_indices is None:
             raise AttributeError("Camera indices are not provided.")
         camera_indices = ray_samples.camera_indices.squeeze()
@@ -363,16 +354,9 @@ class MfnerfField(Field):
             ),
             dim=-1,
         )
-        processed_points = torch.zeros((h.shape[0], 3), dtype=torch.half, device='cuda')
-        original_indicies = torch.arange(h.size(0), device='cuda')
-        applicable_networks = torch.unique(assignments)
-        for i in applicable_networks:
-            mask = assignments == i
-            group_index = original_indicies[mask]
-            group_point = h[mask]
-            processed_points[group_index] = self.mlp_heads[i](group_point)
+
+        rgb = self.mlp_head(h).view(*outputs_shape, -1).to(directions)
                 
-        rgb = processed_points.view(*outputs_shape, -1).to(directions)
         outputs.update({FieldHeadNames.RGB: rgb})
 
         return outputs
