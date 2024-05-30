@@ -209,7 +209,7 @@ class MfnerfField(Field):
         results = ys * networks_x + xs
         del xs
         del ys
-        return results
+        return results.int()
 
     @staticmethod
     def renormalize(points: Tensor, assignments: Tensor, networks_x: Tensor, networks_y: Tensor):
