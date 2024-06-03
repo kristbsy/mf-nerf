@@ -260,8 +260,8 @@ class MfnerfField(Field):
             self._sample_locations.requires_grad = True
         positions_flat = positions.view(-1, 3)
         
-        #positions_flat, assignments = self.assign_renormalize(positions_flat, self.blocks_x, self.blocks_y)
-        assignments = self.get_network_assignments(positions_flat, self.blocks_x, self.blocks_y)
+        positions_flat, assignments = self.assign_renormalize(positions_flat, self.blocks_x, self.blocks_y)
+        #assignments = self.get_network_assignments(positions_flat, self.blocks_x, self.blocks_y)
         processed_points = torch.zeros((positions_flat.shape[0], self.geo_feat_dim + 1), dtype=torch.half, device='cuda')
         original_indicies = torch.arange(positions_flat.size(0), requires_grad=False, device='cuda').detach()
         applicable_networks = torch.unique(assignments)
